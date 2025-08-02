@@ -7,15 +7,27 @@ This repository is a **documentation boilerplate** for Next.js enterprise applic
 ### **Repository Purpose**
 
 - Provide production-ready documentation templates
-- Optimize documentation structure for AI agent understanding
+- Optimize document### **After Completing Any Task**
+
+1. ✅ **Update Status** - Move completed files from 🔄 to ✅
+2. 📊 **Update Progress** - Recalculate percentage and phase completion
+3. 📝 **Add Development Log Entry** - Document what was learned
+4. 🎯 **Update Next Priorities** - Based on new insights or dependencies
+5. 🗺️ **Update Roadmap** - Adjust timeline and milestones if needed
+6. 🧪 **Run Quality Checks** - Validate patterns meet success metrics
+7. ⏸️ **WAIT FOR USER CONFIRMATION** - Present changes and await explicit approval
+8. 📤 **Commit and Push** - Only after user confirms the changes are acceptableructure for AI agent understanding
+
 - Create consistent patterns across Next.js enterprise projects
 - Enable rapid development with AI assistance
 
 ### **GitHub Repository**
+
 - **Repository**: `git@github.com:tlthiago/nextjs-ai-docs-boilerplate.git`
 - **Branch**: `main` (all development happens here)
 - **Commit Policy**: Every completed task must be committed and pushed
 - **Commit Format**: Use conventional commits with clear descriptions
+- **Approval Required**: AI agents must wait for explicit user confirmation before making any commits
 
 ---
 
@@ -380,6 +392,41 @@ find . -name "*.md" | grep -v kebab-case-pattern
 
 ---
 
+## ⏸️ **User Confirmation Protocol**
+
+### **CRITICAL: No Commits Without Approval**
+
+**AI agents MUST follow this protocol:**
+
+1. 🔧 **Make proposed changes** to files
+2. 📋 **Present summary** of what was changed
+3. ⏸️ **WAIT for explicit user confirmation** - Do NOT proceed without approval
+4. ✅ **Only after "yes/confirmed/approved"** - Then commit and push
+5. ❌ **If user rejects** - Revert changes or make adjustments as requested
+
+### **What Requires Confirmation**
+
+- ✅ Any file modifications (code, documentation, configuration)
+- ✅ Git commits and pushes
+- ✅ Progress updates in AI-CONTEXT.md
+- ✅ Roadmap milestone updates
+
+### **Confirmation Phrases to Wait For**
+
+- "Pode fazer o commit" / "You can commit"
+- "Confirmo as alterações" / "I confirm the changes"
+- "Está aprovado" / "It's approved"
+- "Sim, prossiga" / "Yes, proceed"
+
+### **NEVER Commit If User Says**
+
+- "Aguarde" / "Wait"
+- "Não confirmo" / "I don't confirm"
+- "Preciso revisar" / "I need to review"
+- "Altere isso primeiro" / "Change this first"
+
+---
+
 ## 🎯 **Development Workflow**
 
 ### **Before Starting Any Task**
@@ -414,6 +461,7 @@ find . -name "*.md" | grep -v kebab-case-pattern
 - [ ] Roadmap percentage and phase progress updated
 - [ ] Development log entry added
 - [ ] Next priorities updated if needed
+- [ ] **USER CONFIRMATION RECEIVED** - Changes approved before commit
 - [ ] Changes committed and pushed to GitHub repository
 
 ---
