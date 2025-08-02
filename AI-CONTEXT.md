@@ -11,6 +11,12 @@ This repository is a **documentation boilerplate** for Next.js enterprise applic
 - Create consistent patterns across Next.js enterprise projects
 - Enable rapid development with AI assistance
 
+### **GitHub Repository**
+- **Repository**: `git@github.com:tlthiago/nextjs-ai-docs-boilerplate.git`
+- **Branch**: `main` (all development happens here)
+- **Commit Policy**: Every completed task must be committed and pushed
+- **Commit Format**: Use conventional commits with clear descriptions
+
 ---
 
 ## 🎯 **Development Mission**
@@ -288,6 +294,7 @@ Update this file when:
 **Next Priorities**: [Updated priority list]
 **Timeline Adjustment**: [Any changes to roadmap timeline]
 **Quality Notes**: [Lessons learned for future files]
+**Commit Info**: [Commit hash and brief description of changes pushed to GitHub]
 ```
 
 ---
@@ -407,6 +414,7 @@ find . -name "*.md" | grep -v kebab-case-pattern
 - [ ] Roadmap percentage and phase progress updated
 - [ ] Development log entry added
 - [ ] Next priorities updated if needed
+- [ ] Changes committed and pushed to GitHub repository
 
 ---
 
