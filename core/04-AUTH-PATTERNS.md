@@ -2,21 +2,32 @@
 
 ## **Overview**
 
-This project uses **Better Auth** for authentication and authorization, providing enterprise-grade session management, audit trails, and role-based access control.
+This project uses **Better Auth** with admin plugin for enterprise-grade authentication, providing session management, role-based access control, email verification, and comprehensive user management.
 
-> 💡 **Why Better Auth**: Built for business applications with database sessions, audit capabilities, and full session control.
+> 💡 **Why Better Auth**: Built for business applications with database sessions, admin capabilities, and full session control.
 
 ---
 
-## 🔧 **Better Auth Setup**
+## � **Quick Start**
 
-### **Basic Configuration**
+### **Core Authentication Setup**
 
 ```typescript
 // lib/auth.ts
 import { betterAuth } from "better-auth";
-import { prismaAdapter } from "better-auth/adapters/prisma";
-import { prisma } from "./prisma";
+import { prismaAdapter } fr## 📚 Detailed Documentation
+
+For complete implementation details, see the modular authentication documentation:
+
+- **[Better Auth Setup](./auth/better-auth-setup.md)** - Complete configuration with admin plugin
+- **[Permission System](./auth/permission-system.md)** - Advanced role-based access control
+- **[Email Verification](./auth/email-verification.md)** - Email verification implementation
+- **[Reset Password](./auth/reset-password.md)** - Password reset patterns
+- **[Admin Plugin](./auth/admin-plugin-patterns.md)** - Admin user managementr-auth/adapters/prisma";
+import { admin as adminPlugin } from "better-auth/plugins";
+import { UserRole } from "@/generated/prisma";
+import { ac, roles } from "@/lib/permissions";
+import prisma from "@/lib/prisma";
 
 export const auth = betterAuth({
   database: prismaAdapter(prisma, {
@@ -24,24 +35,29 @@ export const auth = betterAuth({
   }),
   emailAndPassword: {
     enabled: true,
+    minPasswordLength: 8,
     requireEmailVerification: true,
-  },
-  session: {
-    expiresIn: 60 * 60 * 24 * 7, // 7 days
-    updateAge: 60 * 60 * 24, // 1 day
-    cookieCache: {
-      enabled: true,
-      maxAge: 60 * 5, // 5 minutes
-    },
   },
   user: {
     additionalFields: {
+      active: {
+        type: "boolean",
+        input: false,
+      },
       role: {
-        type: "string",
-        defaultValue: "user",
+        type: ["ADMIN", "USER"] as Array<UserRole>,
+        input: false,
       },
     },
   },
+  plugins: [
+    adminPlugin({
+      ac, // Access control
+      roles, // Role definitions
+      defaultRole: UserRole.USER,
+      adminRoles: UserRole.ADMIN,
+    }),
+  ],
 });
 
 export type Session = typeof auth.$Infer.Session;
@@ -52,16 +68,29 @@ export type User = typeof auth.$Infer.User;
 
 ```prisma
 // prisma/schema.prisma
-model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  role      String   @default("user")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+enum UserRole {
+  ADMIN
+  USER
+}
 
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String
+  role          UserRole  @default(USER)
+  active        Boolean   @default(true)
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Better Auth relations
   sessions Session[]
   accounts Account[]
+
+  // App-specific relations
+  createdResources Resource[] @relation("CreatedByUser")
+  updatedResources Resource[] @relation("UpdatedByUser")
 
   @@map("users")
 }
@@ -79,12 +108,14 @@ model Session {
 }
 
 model Account {
-  id           String  @id @default(cuid())
-  userId       String
-  providerId   String
-  providerUserId String
-  accessToken  String?
-  refreshToken String?
+  id                String  @id @default(cuid())
+  userId            String
+  providerId        String
+  providerUserId    String
+  accessToken       String?
+  refreshToken      String?
+  accessTokenExpiry DateTime?
+  scope             String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -122,11 +153,21 @@ export async function requireAuth() {
   return session;
 }
 
-export async function requireRole(role: string) {
+export async function requireRole(role: UserRole) {
   const session = await requireAuth();
 
-  if (session.user.role !== role && session.user.role !== "admin") {
+  if (session.user.role !== role && session.user.role !== UserRole.ADMIN) {
     throw new Error("Insufficient permissions");
+  }
+
+  return session;
+}
+
+export async function requireActiveUser() {
+  const session = await requireAuth();
+
+  if (!session.user.active) {
+    throw new Error("Account is inactive");
   }
 
   return session;
@@ -139,6 +180,7 @@ export async function requireRole(role: string) {
 // hooks/use-auth.ts
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { auth } from "@/lib/auth";
+import { UserRole } from "@/generated/prisma";
 
 export function useAuth() {
   const queryClient = useQueryClient();
@@ -151,7 +193,17 @@ export function useAuth() {
 
   const signIn = useMutation({
     mutationFn: async (credentials: { email: string; password: string }) => {
-      return auth.signIn.email(credentials);
+      const result = await auth.signIn.email(credentials);
+
+      if (!result.data?.user.emailVerified) {
+        throw new Error("Please verify your email before signing in");
+      }
+
+      if (!result.data?.user.active) {
+        throw new Error("Your account is inactive. Contact administrator");
+      }
+
+      return result;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["session"] });
@@ -165,11 +217,16 @@ export function useAuth() {
     },
   });
 
+  const user = session?.user;
+
   return {
-    user: session?.user ?? null,
+    user,
     session,
     isLoading,
     isAuthenticated: !!session,
+    isAdmin: user?.role === UserRole.ADMIN,
+    isActive: user?.active ?? false,
+    isEmailVerified: user?.emailVerified ?? false,
     signIn,
     signOut,
   };
@@ -186,6 +243,7 @@ export function useAuth() {
 // lib/api-auth.ts
 import { NextRequest } from "next/server";
 import { auth } from "./auth";
+import { UserRole } from "@/generated/prisma";
 
 export async function withAuth(
   handler: (req: NextRequest, session: Session) => Promise<Response>
@@ -200,6 +258,14 @@ export async function withAuth(
         return new Response("Unauthorized", { status: 401 });
       }
 
+      if (!session.user.active) {
+        return new Response("Account inactive", { status: 403 });
+      }
+
+      if (!session.user.emailVerified) {
+        return new Response("Email not verified", { status: 403 });
+      }
+
       return handler(req, session);
     } catch (error) {
       return new Response("Authentication error", { status: 401 });
@@ -208,16 +274,22 @@ export async function withAuth(
 }
 
 export async function withRole(
-  role: string,
+  role: UserRole,
   handler: (req: NextRequest, session: Session) => Promise<Response>
 ) {
   return withAuth(async (req, session) => {
-    if (session.user.role !== role && session.user.role !== "admin") {
-      return new Response("Forbidden", { status: 403 });
+    if (session.user.role !== role && session.user.role !== UserRole.ADMIN) {
+      return new Response("Insufficient permissions", { status: 403 });
     }
 
     return handler(req, session);
   });
+}
+
+export async function withAdmin(
+  handler: (req: NextRequest, session: Session) => Promise<Response>
+) {
+  return withRole(UserRole.ADMIN, handler);
 }
 ```
 
@@ -281,7 +353,11 @@ export function AuthGuard({
     return null;
   }
 
-  if (requiredRole && user?.role !== requiredRole && user?.role !== "admin") {
+  if (
+    requiredRole &&
+    user?.role !== requiredRole &&
+    user?.role !== UserRole.ADMIN
+  ) {
     return fallback;
   }
 
@@ -396,22 +472,22 @@ export function SignInForm() {
 
 ```typescript
 // types/auth.ts
-export const ROLES = {
-  ADMIN: "admin",
-  MANAGER: "manager",
-  USER: "user",
-} as const;
-
-export type Role = (typeof ROLES)[keyof typeof ROLES];
+import { UserRole } from "@/generated/prisma";
 
 export const ROLE_HIERARCHY = {
-  [ROLES.ADMIN]: 3,
-  [ROLES.MANAGER]: 2,
-  [ROLES.USER]: 1,
+  [UserRole.ADMIN]: 2,
+  [UserRole.USER]: 1,
 } as const;
 
-export function hasPermission(userRole: Role, requiredRole: Role): boolean {
+export function hasPermission(
+  userRole: UserRole,
+  requiredRole: UserRole
+): boolean {
   return ROLE_HIERARCHY[userRole] >= ROLE_HIERARCHY[requiredRole];
+}
+
+export function isAdmin(userRole: UserRole): boolean {
+  return userRole === UserRole.ADMIN;
 }
 ```
 
@@ -420,156 +496,33 @@ export function hasPermission(userRole: Role, requiredRole: Role): boolean {
 ```typescript
 // hooks/use-permissions.ts
 import { useAuth } from "./use-auth";
-import { hasPermission, Role } from "@/types/auth";
+import { hasPermission, isAdmin, UserRole } from "@/types/auth";
 
 export function usePermissions() {
   const { user } = useAuth();
 
-  const checkPermission = (requiredRole: Role): boolean => {
+  const checkPermission = (requiredRole: UserRole): boolean => {
     if (!user) return false;
-    return hasPermission(user.role as Role, requiredRole);
+    return hasPermission(user.role as UserRole, requiredRole);
   };
-
-  const isAdmin = () => checkPermission("admin");
-  const isManager = () => checkPermission("manager");
 
   return {
     checkPermission,
-    isAdmin,
-    isManager,
-    userRole: user?.role as Role,
+    isAdmin: () => (user ? isAdmin(user.role as UserRole) : false),
+    userRole: user?.role as UserRole,
   };
 }
 ```
 
 ---
 
-## 🔍 **Audit Trail Patterns**
-
-### **Session Tracking**
-
-```typescript
-// lib/audit.ts
-import { prisma } from "./prisma";
-
-export async function logUserAction(
-  userId: string,
-  action: string,
-  resource?: string,
-  metadata?: Record<string, any>
-) {
-  await prisma.auditLog.create({
-    data: {
-      userId,
-      action,
-      resource,
-      metadata,
-      timestamp: new Date(),
-      ipAddress: "0.0.0.0", // Get from request
-      userAgent: "unknown", // Get from request
-    },
-  });
-}
-
-// Usage in API routes
-export async function withAudit(
-  action: string,
-  resource: string,
-  handler: (req: NextRequest, session: Session) => Promise<Response>
-) {
-  return withAuth(async (req, session) => {
-    const response = await handler(req, session);
-
-    // Log successful actions
-    if (response.ok) {
-      await logUserAction(session.user.id, action, resource);
-    }
-
-    return response;
-  });
-}
-```
-
----
-
-## 🧪 **Testing Authentication**
-
-### **Test Helper**
-
-```typescript
-// __tests__/helpers/auth.ts
-import { prisma } from "@/lib/prisma";
-import { auth } from "@/lib/auth";
-
-export async function createTestUser(overrides: Partial<User> = {}) {
-  const user = await prisma.user.create({
-    data: {
-      email: "test@example.com",
-      name: "Test User",
-      role: "user",
-      ...overrides,
-    },
-  });
-
-  return user;
-}
-
-export async function createTestSession(userId: string) {
-  const session = await auth.createSession(userId);
-  return session;
-}
-
-export function mockAuthHeaders(sessionToken: string) {
-  return {
-    cookie: `session=${sessionToken}`,
-  };
-}
-```
-
-### **API Route Test Example**
-
-```typescript
-// __tests__/api/resources.test.ts
-import { describe, it, expect, beforeEach } from "@jest/globals";
-import {
-  createTestUser,
-  createTestSession,
-  mockAuthHeaders,
-} from "../helpers/auth";
-
-describe("/api/resources", () => {
-  let testUser: User;
-  let sessionToken: string;
-
-  beforeEach(async () => {
-    testUser = await createTestUser();
-    const session = await createTestSession(testUser.id);
-    sessionToken = session.token;
-  });
-
-  it("should require authentication", async () => {
-    const response = await fetch("/api/resources");
-    expect(response.status).toBe(401);
-  });
-
-  it("should allow authenticated requests", async () => {
-    const response = await fetch("/api/resources", {
-      headers: mockAuthHeaders(sessionToken),
-    });
-    expect(response.status).toBe(200);
-  });
-});
-```
-
----
-
-## 🔧 **Common Patterns**
+## � **Common Patterns**
 
 ### **Protecting API Routes**
 
 ```typescript
 // app/api/resources/route.ts
-import { withAuth } from "@/lib/api-auth";
+import { withAuth, withAdmin } from "@/lib/api-auth";
 
 export const GET = withAuth(async (req, session) => {
   // Access session.user here
@@ -577,8 +530,8 @@ export const GET = withAuth(async (req, session) => {
   return Response.json(resources);
 });
 
-export const POST = withRole("manager", async (req, session) => {
-  // Only managers and admins can create resources
+export const POST = withAdmin(async (req, session) => {
+  // Only admins can create resources
   const data = await req.json();
   const resource = await createResource(data, session.user.id);
   return Response.json(resource);
@@ -592,24 +545,41 @@ export const POST = withRole("manager", async (req, session) => {
 "use client";
 
 import { usePermissions } from "@/hooks/use-permissions";
+import { UserRole } from "@/generated/prisma";
 import { Button } from "@/components/ui/button";
 
 export function ResourceActions() {
-  const { checkPermission } = usePermissions();
+  const { checkPermission, isAdmin } = usePermissions();
 
   return (
     <div className="flex gap-2">
       <Button variant="outline">View</Button>
 
-      {checkPermission("manager") && <Button>Edit</Button>}
+      {checkPermission(UserRole.USER) && <Button>Edit</Button>}
 
-      {checkPermission("admin") && (
-        <Button variant="destructive">Delete</Button>
-      )}
+      {isAdmin() && <Button variant="destructive">Delete</Button>}
     </div>
   );
 }
 ```
+
+---
+
+## 📚 **Detailed Documentation**
+
+For comprehensive implementation guides, see:
+
+- **[Better Auth Setup](./auth/better-auth-setup.md)** - Complete configuration with admin plugin
+- **[Permission System](./auth/permission-system.md)** - Advanced role-based access control
+- **[Email Verification](./auth/email-verification.md)** - Email verification implementation
+- **[Reset Password](./auth/reset-password.md)** - Password reset patterns
+- **[Admin Plugin](./auth/admin-plugin-patterns.md)** - Admin user management
+
+---
+
+## 🚀 **Future Enhancements**
+
+- **[Audit Patterns](./improvements/AUDIT-PATTERNS.md)** - Comprehensive audit logging (Phase 2)
 
 ---
 
@@ -620,26 +590,29 @@ export function ResourceActions() {
 - Always validate sessions on the server side
 - Use TypeScript for session and user types
 - Implement proper error handling for auth failures
-- Log authentication events for audit trails
+- Check user active status and email verification
 - Use role-based permissions consistently
 - Protect API routes with authentication middleware
+- Use environment variables for email configuration
+- Implement rate limiting for sensitive operations
 
 ### **❌ Don't:**
 
 - Store sensitive data in client-side state
 - Trust client-side role validation for security
-- Use long-lived sessions without refresh
-- Skip CSRF protection for state-changing operations
+- Skip email verification in production
+- Allow inactive users to access protected resources
 - Hardcode role checks throughout the app
 - Forget to handle authentication errors gracefully
+- Skip domain validation for business applications
 
 ---
 
 ## 🔗 **Integration with Other Patterns**
 
-- **API Patterns**: All API routes should use `withAuth()` or `withRole()`
-- **Service Patterns**: Pass authenticated user context to services
-- **Error Handling**: Use consistent error responses for auth failures
-- **Testing**: Include authentication tests for all protected resources
+- **[API Patterns](./06-API-PATTERNS.md)** - All API routes should use `withAuth()` or `withRole()`
+- **[Service Patterns](./05-SERVICE-PATTERNS.md)** - Pass authenticated user context to services
+- **[Error Handling](./09-ERROR-HANDLING.md)** - Use consistent error responses for auth failures
+- **[Component Patterns](./07-COMPONENT-PATTERNS.md)** - Implement auth-aware components
 
-This authentication system provides enterprise-grade security while maintaining developer productivity and AI agent compatibility.
+This authentication system provides enterprise-grade security with admin capabilities while maintaining developer productivity and AI agent compatibility.
